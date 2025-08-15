@@ -62,6 +62,35 @@ def load_ndc_direct(rxnsat_path):
             ndc_to_rxcuis[ndc].add(rxcui)
     return ndc_to_rxcuis
 
+# ---------- RXNSAT: active ingredient/moiety/basis of strength ----------
+def load_scd_attrs(rxnsat_path):
+    """Return maps for SCD -> SCDC -> ingredient rxcui for RXN_AM, RXN_AI and RXN_BOSS_FROM."""
+    am  = defaultdict(dict)  # active moiety (IN)
+    ai  = defaultdict(dict)  # active ingredient (PIN)
+    boss= defaultdict(dict)  # basis of strength substance
+    with open(rxnsat_path, newline="", encoding="utf-8") as f:
+        r = csv.reader(f, delimiter="|")
+        for row in r:
+            if len(row) < 12:
+                continue
+            atn = row[8].strip()
+            if atn not in {"RXN_AM","RXN_AI","RXN_BOSS_FROM"}:
+                continue
+            if row[9].strip() != "RXNORM":
+                continue
+            scd   = row[0].strip()
+            scdc  = row[5].strip()
+            target= row[10].strip()
+            if not scd or not scdc or not target:
+                continue
+            if atn == "RXN_AM":
+                am[scd][scdc] = target
+            elif atn == "RXN_AI":
+                ai[scd][scdc] = target
+            else:  # RXN_BOSS_FROM
+                boss[scd][scdc] = target
+    return am, ai, boss
+
 # ---------- RXNREL: hops (bidirectional where needed) ----------
 def load_rel_maps(rel_path, tty_map):
     """
@@ -120,6 +149,7 @@ def main():
     tty_map, name_map, unii_map = load_conso(RXNCONSO)
     ndc_direct = load_ndc_direct(RXNSAT)
     sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = load_rel_maps(RXNREL, tty_map)
+    am_map, ai_map, boss_map = load_scd_attrs(RXNSAT)
 
     out = []
 
@@ -145,28 +175,42 @@ def main():
             # SCD -> SCDC -> IN/PIN (could be multiple)
             ingredients = []
             seen_ing = set()
+            am_by_scdc   = am_map.get(scd, {})
+            ai_by_scdc   = ai_map.get(scd, {})
+            boss_by_scdc = boss_map.get(scd, {})
             for scdc in scd_to_scdc.get(scd, ()):
+                ai_target   = ai_by_scdc.get(scdc)
+                am_target   = am_by_scdc.get(scdc)
+                boss_target = boss_by_scdc.get(scdc)
                 # PINs
                 for pin in scdc_to_pin.get(scdc, ()):
-                    if pin in seen_ing: 
+                    key = (scdc, pin)
+                    if key in seen_ing:
                         continue
-                    seen_ing.add(pin)
+                    seen_ing.add(key)
                     ingredients.append({
+                        "scdc": scdc,
                         "tty": "PIN",
                         "rxcui": pin,
                         "str": name_map.get(pin, ""),
-                        "unii": unii_map.get(pin)
+                        "unii": unii_map.get(pin),
+                        "active_ingredient": pin == ai_target,
+                        "basis_of_strength": pin == boss_target
                     })
-                # INNs
+                # INs
                 for inn in scdc_to_in.get(scdc, ()):
-                    if inn in seen_ing:
+                    key = (scdc, inn)
+                    if key in seen_ing:
                         continue
-                    seen_ing.add(inn)
+                    seen_ing.add(key)
                     ingredients.append({
+                        "scdc": scdc,
                         "tty": "IN",
                         "rxcui": inn,
                         "str": name_map.get(inn, ""),
-                        "unii": unii_map.get(inn)
+                        "unii": unii_map.get(inn),
+                        "active_moiety": inn == am_target,
+                        "basis_of_strength": inn == boss_target
                     })
 
             # Only keep rows that have at least one ingredient
