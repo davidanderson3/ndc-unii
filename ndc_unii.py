@@ -189,13 +189,14 @@ def main():
                         continue
                     seen_ing.add(key)
                     ingredients.append({
-                        "scdc": scdc,
                         "tty": "PIN",
                         "rxcui": pin,
                         "str": name_map.get(pin, ""),
                         "unii": unii_map.get(pin),
                         "active_ingredient": pin == ai_target,
-                        "basis_of_strength": pin == boss_target
+                        "active_moiety": pin == am_target,
+                        "basis_of_strength": pin == boss_target,
+                        "scdc": scdc,
                     })
                 # INs
                 for inn in scdc_to_in.get(scdc, ()):
@@ -204,13 +205,14 @@ def main():
                         continue
                     seen_ing.add(key)
                     ingredients.append({
-                        "scdc": scdc,
                         "tty": "IN",
                         "rxcui": inn,
                         "str": name_map.get(inn, ""),
                         "unii": unii_map.get(inn),
+                        "active_ingredient": inn == ai_target,
                         "active_moiety": inn == am_target,
-                        "basis_of_strength": inn == boss_target
+                        "basis_of_strength": inn == boss_target,
+                        "scdc": scdc,
                     })
 
             # Only keep rows that have at least one ingredient
