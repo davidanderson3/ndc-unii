@@ -85,7 +85,7 @@ def load_scd_attrs(rxnsat_path):
 
             # ATV contains "{SCDC_RxCUI} INGREDIENT_RxCUI"; parse both
             atv = row[10].strip()
-            m = re.search(r"\{(\d+)\}\s*(\d+)", atv)
+            m = re.search(r"\{(\d+)\}\s*(\d+|AI|AM)", atv)
             if not m:
                 continue
             scdc, target = m.group(1), m.group(2)
@@ -97,7 +97,7 @@ def load_scd_attrs(rxnsat_path):
             elif atn == "RXN_AI":
                 ai[scd][scdc] = target
             else:  # RXN_BOSS_FROM
-                boss[scd][scdc] = target
+                boss[scd][scdc] = target  # target may be RxCUI or 'AI'/'AM'
     return am, ai, boss
 
 # ---------- RXNREL: hops (bidirectional where needed) ----------
@@ -188,9 +188,15 @@ def main():
             ai_by_scdc   = ai_map.get(scd, {})
             boss_by_scdc = boss_map.get(scd, {})
             for scdc in scd_to_scdc.get(scd, ()):
-                ai_target   = ai_by_scdc.get(scdc)
-                am_target   = am_by_scdc.get(scdc)
-                boss_target = boss_by_scdc.get(scdc)
+                ai_target  = ai_by_scdc.get(scdc)
+                am_target  = am_by_scdc.get(scdc)
+                boss_key   = boss_by_scdc.get(scdc)
+                if boss_key == "AI":
+                    boss_target = ai_target
+                elif boss_key == "AM":
+                    boss_target = am_target
+                else:
+                    boss_target = boss_key
                 # PINs
                 for pin in scdc_to_pin.get(scdc, ()):
                     key = (scdc, pin)
