@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import csv, json, sys
+import csv, json, sys, re
 from pathlib import Path
 from collections import defaultdict
 
@@ -78,11 +78,20 @@ def load_scd_attrs(rxnsat_path):
                 continue
             if row[9].strip() != "RXNORM":
                 continue
-            scd   = row[0].strip()
-            scdc  = row[5].strip()
-            target= row[10].strip()
-            if not scd or not scdc or not target:
+
+            scd = row[0].strip()
+            if not scd:
                 continue
+
+            # ATV contains "{SCDC_RxCUI} INGREDIENT_RxCUI"; parse both
+            atv = row[10].strip()
+            m = re.search(r"\{(\d+)\}\s*(\d+)", atv)
+            if not m:
+                continue
+            scdc, target = m.group(1), m.group(2)
+            if not scdc or not target:
+                continue
+
             if atn == "RXN_AM":
                 am[scd][scdc] = target
             elif atn == "RXN_AI":
