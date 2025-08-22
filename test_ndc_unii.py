@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import html
 
 import pytest
 
@@ -90,26 +91,64 @@ def build_expected():
 
 
 def test_json_matches_rrf():
-    subprocess.run([sys.executable, "ndc_unii.py"], check=True)
-    with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
-        data = json.load(f)
-    expected = build_expected()
-    for datum, exp in zip(data, expected):
-        if datum != exp:
-            pair = {"data": datum, "expected": exp}
-            pytest.fail(
-                "Record mismatch for NDC {d_ndc}/RxCUI {d_rxcui} vs NDC {e_ndc}/RxCUI {e_rxcui}\n"
-                "data ingredients:\n{d_ing}\nexpected ingredients:\n{e_ing}\nfull diff:\n{diff}".format(
-                    d_ndc=datum.get("ndc"),
-                    d_rxcui=datum.get("rxcui"),
-                    e_ndc=exp.get("ndc"),
-                    e_rxcui=exp.get("rxcui"),
-                    d_ing=json.dumps(datum.get("ingredients"), indent=2),
-                    e_ing=json.dumps(exp.get("ingredients"), indent=2),
-                    diff=json.dumps(pair, indent=2),
+    """Run ndc_unii.py and compare its JSON output to the RxNorm RRF files.
+
+    The test now emits a small HTML report describing each step performed and
+    whether it succeeded or failed.  The report is written to
+    ``test_json_matches_rrf_report.html`` in the repository root.
+    """
+
+    steps = []
+    try:
+        steps.append("Executing ndc_unii.py to generate ndc_unii_rxnorm.json")
+        subprocess.run([sys.executable, "ndc_unii.py"], check=True)
+        steps.append("ndc_unii.py completed successfully")
+
+        steps.append("Loading generated JSON output")
+        with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
+            data = json.load(f)
+
+        steps.append("Building expected dataset from RxNorm RRF files")
+        expected = build_expected()
+
+        steps.append("Comparing script output to expected data")
+        for datum, exp in zip(data, expected):
+            if datum != exp:
+                pair = {"data": datum, "expected": exp}
+                steps.append(
+                    f"Record mismatch for NDC {datum.get('ndc')} / RxCUI {datum.get('rxcui')}"
                 )
+                pytest.fail(
+                    "Record mismatch for NDC {d_ndc}/RxCUI {d_rxcui} vs NDC {e_ndc}/RxCUI {e_rxcui}\n"
+                    "data ingredients:\n{d_ing}\nexpected ingredients:\n{e_ing}\nfull diff:\n{diff}".format(
+                        d_ndc=datum.get("ndc"),
+                        d_rxcui=datum.get("rxcui"),
+                        e_ndc=exp.get("ndc"),
+                        e_rxcui=exp.get("rxcui"),
+                        d_ing=json.dumps(datum.get("ingredients"), indent=2),
+                        e_ing=json.dumps(exp.get("ingredients"), indent=2),
+                        diff=json.dumps(pair, indent=2),
+                    )
+                )
+
+        if len(data) != len(expected):
+            steps.append(
+                f"Length mismatch: {len(data)} records vs {len(expected)} expected"
             )
-    if len(data) != len(expected):
-        pytest.fail(
-            f"Length mismatch: {len(data)} records vs {len(expected)} expected"
-        )
+            pytest.fail(
+                f"Length mismatch: {len(data)} records vs {len(expected)} expected"
+            )
+
+        steps.append("All records matched; record counts are equal")
+    except Exception as exc:  # pragma: no cover - exception path
+        steps.append(f"Test failed: {exc}")
+        raise
+    finally:
+        with open("test_json_matches_rrf_report.html", "w", encoding="utf-8") as rep:
+            rep.write(
+                "<html><head><meta charset='utf-8'><title>test_json_matches_rrf Report"\
+                "</title></head><body><h1>test_json_matches_rrf Report</h1><ul>"
+            )
+            for step in steps:
+                rep.write(f"<li>{html.escape(str(step))}</li>")
+            rep.write("</ul></body></html>")
