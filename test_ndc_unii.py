@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import html
+from collections import Counter
 
 import pytest
 
@@ -90,6 +91,39 @@ def build_expected():
     return out
 
 
+def summarize_counts(data):
+    """Return counts for key data elements in *data* list."""
+    counts = {
+        "records": len(data),
+        "unique_ndc": len({rec["ndc"] for rec in data}),
+        "tty": dict(Counter(rec["tty"] for rec in data)),
+    }
+    total_ingredients = 0
+    ingredient_tty = Counter()
+    active_ingredient = active_moiety = basis_of_strength = 0
+    for rec in data:
+        ings = rec.get("ingredients", [])
+        total_ingredients += len(ings)
+        for ing in ings:
+            ingredient_tty[ing["tty"]] += 1
+            if ing.get("active_ingredient"):
+                active_ingredient += 1
+            if ing.get("active_moiety"):
+                active_moiety += 1
+            if ing.get("basis_of_strength"):
+                basis_of_strength += 1
+    counts.update(
+        {
+            "total_ingredients": total_ingredients,
+            "ingredient_tty": dict(ingredient_tty),
+            "active_ingredient": active_ingredient,
+            "active_moiety": active_moiety,
+            "basis_of_strength": basis_of_strength,
+        }
+    )
+    return counts
+
+
 def test_json_matches_rrf():
     """Run ndc_unii.py and compare its JSON output to the RxNorm RRF files.
 
@@ -108,22 +142,39 @@ def test_json_matches_rrf():
         with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
             data = json.load(f)
         steps.append(f"Loaded {len(data)} records from ndc_unii_rxnorm.json")
+        data_counts = summarize_counts(data)
+        steps.append(
+            "Output dataset counts: " + html.escape(json.dumps(data_counts, sort_keys=True))
+        )
 
         steps.append("Building expected dataset from RxNorm RRF files")
         expected = build_expected()
         steps.append(f"Built expected dataset with {len(expected)} records")
+        expected_counts = summarize_counts(expected)
+        steps.append(
+            "Expected dataset counts: " + html.escape(json.dumps(expected_counts, sort_keys=True))
+        )
 
         steps.append("Comparing script output to expected data")
         mismatches = []
+        mismatch_counts = Counter()
         for datum, exp in zip(data, expected):
             if datum != exp:
                 mismatches.append({"data": datum, "expected": exp})
+                for key in {"ndc", "tty", "rxcui", "str", "ingredients"}:
+                    if datum.get(key) != exp.get(key):
+                        mismatch_counts[key] += 1
 
         compared = min(len(data), len(expected))
         steps.append(f"Compared {compared} records")
 
         if mismatches:
             steps.append(f"Found {len(mismatches)} mismatched records")
+            if mismatch_counts:
+                steps.append(
+                    "Mismatch counts by field: "
+                    + html.escape(json.dumps(dict(mismatch_counts), sort_keys=True))
+                )
             pair = mismatches[0]
             datum, exp = pair["data"], pair["expected"]
             pytest.fail(
