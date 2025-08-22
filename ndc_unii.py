@@ -233,6 +233,8 @@ def main():
             # Only keep rows that have at least one ingredient
             if not ingredients:
                 continue
+            # Sort ingredients deterministically
+            ingredients.sort(key=lambda ing: (ing["scdc"], ing["tty"], ing["rxcui"]))
 
             out.append({
                 "ndc": ndc,
@@ -242,6 +244,8 @@ def main():
                 "ingredients": ingredients
             })
 
+    # Ensure deterministic order of records
+    out.sort(key=lambda rec: (rec["ndc"], rec["tty"], rec["rxcui"]))
     with open(OUTPUT, "w", encoding="utf-8") as g:
         json.dump(out, g, indent=2)
     print(f"Wrote {len(out)} rows to {OUTPUT}")
