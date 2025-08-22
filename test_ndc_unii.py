@@ -93,8 +93,8 @@ def build_expected():
 def test_json_matches_rrf():
     """Run ndc_unii.py and compare its JSON output to the RxNorm RRF files.
 
-    The test now emits a small HTML report describing each step performed and
-    whether it succeeded or failed.  The report is written to
+    The test emits an HTML report describing exactly what was executed and
+    compared, including record counts for each stage. The report is written to
     ``test_json_matches_rrf_report.html`` in the repository root.
     """
 
@@ -107,39 +107,49 @@ def test_json_matches_rrf():
         steps.append("Loading generated JSON output")
         with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
             data = json.load(f)
+        steps.append(f"Loaded {len(data)} records from ndc_unii_rxnorm.json")
 
         steps.append("Building expected dataset from RxNorm RRF files")
         expected = build_expected()
+        steps.append(f"Built expected dataset with {len(expected)} records")
 
         steps.append("Comparing script output to expected data")
+        mismatches = []
         for datum, exp in zip(data, expected):
             if datum != exp:
-                pair = {"data": datum, "expected": exp}
-                steps.append(
-                    f"Record mismatch for NDC {datum.get('ndc')} / RxCUI {datum.get('rxcui')}"
+                mismatches.append({"data": datum, "expected": exp})
+
+        compared = min(len(data), len(expected))
+        steps.append(f"Compared {compared} records")
+
+        if mismatches:
+            steps.append(f"Found {len(mismatches)} mismatched records")
+            pair = mismatches[0]
+            datum, exp = pair["data"], pair["expected"]
+            pytest.fail(
+                "Record mismatch for NDC {d_ndc}/RxCUI {d_rxcui} vs NDC {e_ndc}/RxCUI {e_rxcui}\n"
+                "data ingredients:\n{d_ing}\nexpected ingredients:\n{e_ing}\nfull diff:\n{diff}".format(
+                    d_ndc=datum.get("ndc"),
+                    d_rxcui=datum.get("rxcui"),
+                    e_ndc=exp.get("ndc"),
+                    e_rxcui=exp.get("rxcui"),
+                    d_ing=json.dumps(datum.get("ingredients"), indent=2),
+                    e_ing=json.dumps(exp.get("ingredients"), indent=2),
+                    diff=json.dumps(pair, indent=2),
                 )
-                pytest.fail(
-                    "Record mismatch for NDC {d_ndc}/RxCUI {d_rxcui} vs NDC {e_ndc}/RxCUI {e_rxcui}\n"
-                    "data ingredients:\n{d_ing}\nexpected ingredients:\n{e_ing}\nfull diff:\n{diff}".format(
-                        d_ndc=datum.get("ndc"),
-                        d_rxcui=datum.get("rxcui"),
-                        e_ndc=exp.get("ndc"),
-                        e_rxcui=exp.get("rxcui"),
-                        d_ing=json.dumps(datum.get("ingredients"), indent=2),
-                        e_ing=json.dumps(exp.get("ingredients"), indent=2),
-                        diff=json.dumps(pair, indent=2),
-                    )
-                )
+            )
 
         if len(data) != len(expected):
             steps.append(
-                f"Length mismatch: {len(data)} records vs {len(expected)} expected"
+                f"Record count mismatch: {len(data)} records vs {len(expected)} expected"
             )
             pytest.fail(
-                f"Length mismatch: {len(data)} records vs {len(expected)} expected"
+                f"Length mismatch: {len(data)} records vs {len(expected)} expected",
             )
 
-        steps.append("All records matched; record counts are equal")
+        steps.append(
+            f"All records matched; output records: {len(data)}, expected records: {len(expected)}"
+        )
     except Exception as exc:  # pragma: no cover - exception path
         steps.append(f"Test failed: {exc}")
         raise
