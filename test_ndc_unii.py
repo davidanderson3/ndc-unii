@@ -2,6 +2,8 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 import ndc_unii
 
 
@@ -92,4 +94,22 @@ def test_json_matches_rrf():
     with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
         data = json.load(f)
     expected = build_expected()
-    assert data == expected
+    for datum, exp in zip(data, expected):
+        if datum != exp:
+            pair = {"data": datum, "expected": exp}
+            pytest.fail(
+                "Record mismatch for NDC {d_ndc}/RxCUI {d_rxcui} vs NDC {e_ndc}/RxCUI {e_rxcui}\n"
+                "data ingredients:\n{d_ing}\nexpected ingredients:\n{e_ing}\nfull diff:\n{diff}".format(
+                    d_ndc=datum.get("ndc"),
+                    d_rxcui=datum.get("rxcui"),
+                    e_ndc=exp.get("ndc"),
+                    e_rxcui=exp.get("rxcui"),
+                    d_ing=json.dumps(datum.get("ingredients"), indent=2),
+                    e_ing=json.dumps(exp.get("ingredients"), indent=2),
+                    diff=json.dumps(pair, indent=2),
+                )
+            )
+    if len(data) != len(expected):
+        pytest.fail(
+            f"Length mismatch: {len(data)} records vs {len(expected)} expected"
+        )
