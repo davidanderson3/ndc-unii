@@ -73,6 +73,8 @@ def build_expected():
                     })
             if not ingredients:
                 continue
+            # Sort ingredients deterministically to mirror script output
+            ingredients.sort(key=lambda ing: (ing["scdc"], ing["tty"], ing["rxcui"]))
             out.append({
                 "ndc": ndc,
                 "tty": dtty,
@@ -80,6 +82,8 @@ def build_expected():
                 "str": name_map.get(direct, ""),
                 "ingredients": ingredients,
             })
+    # Sort final records as script does
+    out.sort(key=lambda rec: (rec["ndc"], rec["tty"], rec["rxcui"]))
     return out
 
 
