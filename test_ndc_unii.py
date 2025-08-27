@@ -144,7 +144,8 @@ def test_json_matches_rrf():
         steps.append(f"Loaded {len(data)} records from ndc_unii_rxnorm.json")
         data_counts = summarize_counts(data)
         steps.append(
-            "Output dataset counts: " + html.escape(json.dumps(data_counts, sort_keys=True))
+            "Output dataset counts: "
+            + html.escape(json.dumps(data_counts, sort_keys=True), quote=False)
         )
 
         steps.append("Building expected dataset from RxNorm RRF files")
@@ -152,7 +153,8 @@ def test_json_matches_rrf():
         steps.append(f"Built expected dataset with {len(expected)} records")
         expected_counts = summarize_counts(expected)
         steps.append(
-            "Expected dataset counts: " + html.escape(json.dumps(expected_counts, sort_keys=True))
+            "Expected dataset counts: "
+            + html.escape(json.dumps(expected_counts, sort_keys=True), quote=False)
         )
 
         steps.append("Comparing script output to expected data")
@@ -173,7 +175,9 @@ def test_json_matches_rrf():
             if mismatch_counts:
                 steps.append(
                     "Mismatch counts by field: "
-                    + html.escape(json.dumps(dict(mismatch_counts), sort_keys=True))
+                    + html.escape(
+                        json.dumps(dict(mismatch_counts), sort_keys=True), quote=False
+                    )
                 )
             pair = mismatches[0]
             datum, exp = pair["data"], pair["expected"]
@@ -211,5 +215,5 @@ def test_json_matches_rrf():
                 "</title></head><body><h1>test_json_matches_rrf Report</h1><ul>"
             )
             for step in steps:
-                rep.write(f"<li>{html.escape(str(step))}</li>")
+                rep.write(f"<li>{html.escape(str(step), quote=False)}</li>")
             rep.write("</ul></body></html>")
