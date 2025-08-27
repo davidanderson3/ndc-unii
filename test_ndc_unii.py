@@ -221,17 +221,30 @@ def test_json_matches_rrf():
                     "</th><th>Expected dataset</th></tr>"
                 )
                 all_keys = sorted(set(data_counts) | set(expected_counts))
-                for key in all_keys:
-                    def fmt(val):
-                        if isinstance(val, dict):
-                            return html.escape(
-                                json.dumps(val, sort_keys=True), quote=False
-                            )
-                        return html.escape(str(val), quote=False)
 
-                    rep.write(
-                        f"<tr><td>{html.escape(key)}</td><td>{fmt(data_counts.get(key))}</td><td>{fmt(expected_counts.get(key))}</td></tr>"
-                    )
+                def fmt(val):
+                    if val is None:
+                        return ""
+                    return html.escape(str(val), quote=False)
+
+                for key in all_keys:
+                    val_data = data_counts.get(key)
+                    val_exp = expected_counts.get(key)
+                    if isinstance(val_data, dict) or isinstance(val_exp, dict):
+                        sub_keys = sorted(
+                            set((val_data or {}).keys())
+                            | set((val_exp or {}).keys())
+                        )
+                        for sub in sub_keys:
+                            rep.write(
+                                f"<tr><td>{html.escape(f'{key}.{sub}')}</td>"
+                                f"<td>{fmt((val_data or {}).get(sub))}</td>"
+                                f"<td>{fmt((val_exp or {}).get(sub))}</td></tr>"
+                            )
+                    else:
+                        rep.write(
+                            f"<tr><td>{html.escape(key)}</td><td>{fmt(val_data)}</td><td>{fmt(val_exp)}</td></tr>"
+                        )
                 rep.write("</table>")
 
             rep.write("</body></html>")
