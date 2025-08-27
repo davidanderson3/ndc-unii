@@ -133,6 +133,8 @@ def test_json_matches_rrf():
     """
 
     steps = []
+    data_counts = {}
+    expected_counts = {}
     try:
         steps.append("Executing ndc_unii.py to generate ndc_unii_rxnorm.json")
         subprocess.run([sys.executable, "ndc_unii.py"], check=True)
@@ -143,19 +145,13 @@ def test_json_matches_rrf():
             data = json.load(f)
         steps.append(f"Loaded {len(data)} records from ndc_unii_rxnorm.json")
         data_counts = summarize_counts(data)
-        steps.append(
-            "Output dataset counts: "
-            + html.escape(json.dumps(data_counts, sort_keys=True), quote=False)
-        )
+        steps.append("Summarized output dataset counts")
 
         steps.append("Building expected dataset from RxNorm RRF files")
         expected = build_expected()
         steps.append(f"Built expected dataset with {len(expected)} records")
         expected_counts = summarize_counts(expected)
-        steps.append(
-            "Expected dataset counts: "
-            + html.escape(json.dumps(expected_counts, sort_keys=True), quote=False)
-        )
+        steps.append("Summarized expected dataset counts")
 
         steps.append("Comparing script output to expected data")
         mismatches = []
@@ -216,4 +212,26 @@ def test_json_matches_rrf():
             )
             for step in steps:
                 rep.write(f"<li>{html.escape(str(step), quote=False)}</li>")
-            rep.write("</ul></body></html>")
+            rep.write("</ul>")
+
+            if data_counts or expected_counts:
+                rep.write("<h2>Dataset Count Comparison</h2>")
+                rep.write(
+                    "<table border='1'><tr><th>Metric</th><th>Output dataset"\
+                    "</th><th>Expected dataset</th></tr>"
+                )
+                all_keys = sorted(set(data_counts) | set(expected_counts))
+                for key in all_keys:
+                    def fmt(val):
+                        if isinstance(val, dict):
+                            return html.escape(
+                                json.dumps(val, sort_keys=True), quote=False
+                            )
+                        return html.escape(str(val), quote=False)
+
+                    rep.write(
+                        f"<tr><td>{html.escape(key)}</td><td>{fmt(data_counts.get(key))}</td><td>{fmt(expected_counts.get(key))}</td></tr>"
+                    )
+                rep.write("</table>")
+
+            rep.write("</body></html>")
