@@ -64,10 +64,10 @@ def load_ndc_direct(rxnsat_path):
 
 # ---------- RXNSAT: active ingredient/moiety/basis of strength ----------
 def load_scd_attrs(rxnsat_path):
-    """Return maps for SCD -> SCDC -> ingredient rxcui for RXN_AM, RXN_AI and RXN_BOSS_FROM."""
-    am  = defaultdict(dict)  # active moiety (IN)
-    ai  = defaultdict(dict)  # active ingredient (PIN)
-    boss= defaultdict(dict)  # basis of strength substance
+    """Return maps for SCD -> SCDC -> ingredient target for RXN_AM/RXN_AI/RXN_BOSS_FROM."""
+    am = defaultdict(dict)
+    ai = defaultdict(dict)
+    boss = defaultdict(dict)
     with open(rxnsat_path, newline="", encoding="utf-8") as f:
         r = csv.reader(f, delimiter="|")
         for row in r:
@@ -100,7 +100,7 @@ def load_scd_attrs(rxnsat_path):
                 boss[scd][scdc] = target  # target may be RxCUI or 'AI'/'AM'
     return am, ai, boss
 
-# ---------- RXNREL: hops (bidirectional where needed) ----------
+# ---------- RXNREL: hops needed to resolve to SCD and SCDC ingredients ----------
 def load_rel_maps(rel_path, tty_map):
     """
     Build maps:
@@ -181,28 +181,31 @@ def main():
             if not scd:  # skip if no SCD resolution (should be rare)
                 continue
 
-            # SCD -> SCDC -> IN/PIN (could be multiple)
+            # Gather ingredients flagged directly on the SCD via RXN attributes
             ingredients = []
-            seen_ing = set()
+            seen_keys = set()
+            seen_rxcuis = set()
             am_by_scdc   = am_map.get(scd, {})
             ai_by_scdc   = ai_map.get(scd, {})
             boss_by_scdc = boss_map.get(scd, {})
-            for scdc in scd_to_scdc.get(scd, ()):
-                ai_target  = ai_by_scdc.get(scdc)
-                am_target  = am_by_scdc.get(scdc)
-                boss_key   = boss_by_scdc.get(scdc)
+
+            for scdc in scd_to_scdc.get(scd, ()):  # include related ingredients via SCDC
+                ai_target = ai_by_scdc.get(scdc)
+                am_target = am_by_scdc.get(scdc)
+                boss_key  = boss_by_scdc.get(scdc)
                 if boss_key == "AI":
                     boss_target = ai_target
                 elif boss_key == "AM":
                     boss_target = am_target
                 else:
                     boss_target = boss_key
-                # PINs
-                for pin in scdc_to_pin.get(scdc, ()):
+
+                for pin in scdc_to_pin.get(scdc, ()):  # precise ingredients
                     key = (scdc, pin)
-                    if key in seen_ing:
+                    if key in seen_keys:
                         continue
-                    seen_ing.add(key)
+                    seen_keys.add(key)
+                    seen_rxcuis.add(pin)
                     ingredients.append({
                         "tty": "PIN",
                         "rxcui": pin,
@@ -213,12 +216,13 @@ def main():
                         "basis_of_strength": pin == boss_target,
                         "scdc": scdc,
                     })
-                # INs
-                for inn in scdc_to_in.get(scdc, ()):
+
+                for inn in scdc_to_in.get(scdc, ()):  # ingredients
                     key = (scdc, inn)
-                    if key in seen_ing:
+                    if key in seen_keys:
                         continue
-                    seen_ing.add(key)
+                    seen_keys.add(key)
+                    seen_rxcuis.add(inn)
                     ingredients.append({
                         "tty": "IN",
                         "rxcui": inn,
@@ -230,11 +234,42 @@ def main():
                         "scdc": scdc,
                     })
 
+            # Ensure attribute-linked ingredients that might lack SCDC rels are included
+            ai_targets = {t for t in ai_by_scdc.values() if t and t.isdigit()}
+            am_targets = {t for t in am_by_scdc.values() if t and t.isdigit()}
+            basis_targets = set()
+            for scdc, key in boss_by_scdc.items():
+                if key == "AI":
+                    target = ai_by_scdc.get(scdc)
+                elif key == "AM":
+                    target = am_by_scdc.get(scdc)
+                else:
+                    target = key
+                if target and target.isdigit():
+                    basis_targets.add(target)
+
+            attr_targets = ai_targets | am_targets | basis_targets
+            for target in sorted(attr_targets):
+                if target in seen_rxcuis:
+                    continue
+                seen_rxcuis.add(target)
+                ingredients.append({
+                    "tty": tty_map.get(target, ""),
+                    "rxcui": target,
+                    "str": name_map.get(target, ""),
+                    "unii": unii_map.get(target),
+                    "active_ingredient": target in ai_targets,
+                    "active_moiety": target in am_targets,
+                    "basis_of_strength": target in basis_targets,
+                    "scdc": None,
+                })
+
             # Only keep rows that have at least one ingredient
             if not ingredients:
                 continue
-            # Sort ingredients deterministically
-            ingredients.sort(key=lambda ing: (ing["scdc"], ing["tty"], ing["rxcui"]))
+
+            # Sort ingredients deterministically by TTY then RxCUI for stable JSON
+            ingredients.sort(key=lambda ing: (ing.get("tty") or "", ing["rxcui"]))
 
             out.append({
                 "ndc": ndc,

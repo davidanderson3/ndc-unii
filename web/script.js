@@ -126,6 +126,11 @@
           const uniiVal = ing.unii ? ing.unii : '-';
           unii.innerHTML = `<strong>UNII</strong>: ${uniiVal}`;
           block.appendChild(unii);
+          const scdc = document.createElement('div');
+          scdc.className = 'scdc';
+          const scdcLabel = ing.scdc ? `yes (RxCUI ${ing.scdc})` : 'no';
+          scdc.innerHTML = `<strong>SCDC link</strong>: ${scdcLabel}`;
+          block.appendChild(scdc);
           card.appendChild(block);
         }
       }
