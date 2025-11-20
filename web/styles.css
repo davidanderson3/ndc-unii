@@ -9,7 +9,11 @@ input[type="search"], input[type="text"]{flex:1;appearance:none;background:#ffff
 input[type="search"]:focus, input[type="text"]:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(110,168,254,.25)}
 #searchBtn{padding:10px 14px;border:1px solid var(--border);background:#ffffff;color:var(--fg);border-radius:6px;cursor:pointer}
 #searchBtn:hover{border-color:var(--accent)}
-#status{min-width:120px;color:var(--muted);font-size:12px}
+.status-wrap{display:flex;align-items:center;gap:6px;min-width:140px}
+#status{color:var(--muted);font-size:12px}
+#spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin 0.9s linear infinite;opacity:0;transition:opacity 0.2s}
+#spinner.show{opacity:1}
+@keyframes spin{to{transform:rotate(360deg)}}
 .examples{margin-top:8px;display:flex;flex-wrap:wrap;gap:12px}
 .example-group{display:flex;flex-direction:column;gap:4px}
 .example-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -19,7 +23,7 @@ input[type="search"]:focus, input[type="text"]:focus{border-color:var(--accent);
 main{padding:14px 16px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 12px;margin:8px 0}
 .row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.ndc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+.ndc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;font-size:16px;color:#b91c1c}
 .tty{color:var(--accent);font-weight:600}
 .name{color:var(--fg);font-weight:700;font-size:16px}
 .kv{font-size:13px; margin:2px 0}

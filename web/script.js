@@ -3,6 +3,7 @@
   const $ = (sel) => document.querySelector(sel);
   const qEl = $('#q');
   const statusEl = $('#status');
+  const spinnerEl = $('#spinner');
   const resultsEl = $('#results');
   const searchBtn = document.getElementById('searchBtn');
 
@@ -15,6 +16,7 @@
   const digits = (s) => (s||'').replace(/\D+/g, '');
   const bucketOf = (ndcOrQueryDigits) => (ndcOrQueryDigits || '').slice(0,3);
   const isNumeric = (s) => /^[0-9]+$/.test(s || '');
+  const tokens = (s) => (s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
   // URL query sync
   function getParam(name){
@@ -28,6 +30,7 @@
   }
 
   function setStatus(txt){ statusEl.textContent = txt || ''; }
+  function setLoading(on){ if (spinnerEl){ spinnerEl.classList.toggle('show', !!on); } }
 
   async function loadIndex(){
     if (bucketIndex) return bucketIndex;
@@ -172,6 +175,8 @@
     const q = query.trim().toLowerCase();
     const qd = digits(q);
     const qdOk = qd.length >= 3;
+    const hasLetters = /[a-z]/i.test(q);
+    const qTokens = tokens(q);
     return records.filter(rec => {
       const ndcDigits = digits(rec.ndc);
       const name = (rec.str || '').toLowerCase();
@@ -183,8 +188,8 @@
         }
       }
       const hasUNII = uniis.has(q);
-      const ndcMatch = qdOk ? ndcDigits.includes(qd) : false;
-      const nameMatch = name.includes(q);
+      const ndcMatch = (!hasLetters && qdOk) ? ndcDigits.includes(qd) : false;
+      const nameMatch = qTokens.length ? qTokens.every(t => name.includes(t)) : name.includes(q);
       const rxcuiMatch = rxcui && rxcui.includes(q);
       return ndcMatch || nameMatch || hasUNII || rxcuiMatch;
     });
@@ -196,66 +201,72 @@
     const qTrim = query.trim();
     const qd = digits(qTrim);
     const hasLetters = /[a-z]/i.test(qTrim);
+    setLoading(true);
 
-    if (!qd && !hasLetters){
-      setStatus('Ready');
-      resultsEl.innerHTML = '<div class="hint">Enter an NDC (3+ digits) or search by name, RxCUI, or UNII.</div>';
-      return;
-    }
-
-    // NDC-only search path
-    if (!hasLetters && qd.length > 0 && qd.length < 3){
-      setStatus('Type 3+ digits');
-      resultsEl.innerHTML = '<div class="hint">Enter at least the first 3 NDC digits.</div>';
-      return;
-    }
-
-    await loadIndex();
-
-    // Try search index first (covers name/RxCUI/UNII and numeric RxCUIs);
-    // fall back to NDC bucket if nothing found and query looks like NDC digits.
-    let bucketsToLoad = new Set();
     try {
-      const idx = await loadSearchIndex();
-      const qLower = qTrim.toLowerCase();
-      for (const rec of idx.records || []){
-        const name = (rec.name || '').toLowerCase();
-        const rxcui = (rec.rxcui || '').toString().toLowerCase();
-        const uniis = (rec.unii || []).map(u => String(u).toLowerCase());
-        const ndcDigits = digits(rec.ndc);
-        const ndcMatch = qd.length >= 3 ? ndcDigits.includes(qd) : false;
-        const nameMatch = qLower && name.includes(qLower);
-        const rxcuiMatch = qLower && rxcui.includes(qLower);
-        const uniiMatch = qLower && uniis.includes(qLower);
-        if (ndcMatch || nameMatch || rxcuiMatch || uniiMatch){
-          if (rec.bucket) bucketsToLoad.add(rec.bucket);
-        }
+      if (!qd && !hasLetters){
+        setStatus('Ready');
+        resultsEl.innerHTML = '<div class="hint">Enter an NDC (3+ digits) or search by name, RxCUI, or UNII.</div>';
+        return;
       }
-    } catch (e){
-      setStatus('Search index missing; ensure web/data/search_index.json exists');
-      render([], qTrim);
-      return;
-    }
 
-    if (bucketsToLoad.size === 0 && qd.length >= 3){
-      bucketsToLoad.add(bucketOf(qd));
-    }
+      // NDC-only search path
+      if (!hasLetters && qd.length > 0 && qd.length < 3){
+        setStatus('Type 3+ digits');
+        resultsEl.innerHTML = '<div class="hint">Enter at least the first 3 NDC digits.</div>';
+        return;
+      }
 
-    if (bucketsToLoad.size === 0){
-      setStatus('0 matches');
-      render([], qTrim);
-      return;
-    }
+      await loadIndex();
 
-    const combined = [];
-    for (const b of bucketsToLoad){
-      const data = await loadBucket(b);
-      combined.push(...data);
-    }
+      // Try search index first (covers name/RxCUI/UNII and numeric RxCUIs);
+      // fall back to NDC bucket if nothing found and query looks like NDC digits.
+      let bucketsToLoad = new Set();
+      try {
+        const idx = await loadSearchIndex();
+        const qLower = qTrim.toLowerCase();
+        const qTokens = tokens(qLower);
+        for (const rec of idx.records || []){
+          const name = (rec.name || '').toLowerCase();
+          const rxcui = (rec.rxcui || '').toString().toLowerCase();
+          const uniis = (rec.unii || []).map(u => String(u).toLowerCase());
+          const ndcDigits = digits(rec.ndc);
+          const ndcMatch = (!hasLetters && qd.length >= 3) ? ndcDigits.includes(qd) : false;
+          const nameMatch = qTokens.length ? qTokens.every(t => name.includes(t)) : (qLower && name.includes(qLower));
+          const rxcuiMatch = qLower && rxcui.includes(qLower);
+          const uniiMatch = qLower && uniis.includes(qLower);
+          if (ndcMatch || nameMatch || rxcuiMatch || uniiMatch){
+            if (rec.bucket) bucketsToLoad.add(rec.bucket);
+          }
+        }
+      } catch (e){
+        setStatus('Search index missing; ensure web/data/search_index.json exists');
+        render([], qTrim);
+        return;
+      }
 
-    const filtered = filterRecords(combined, qTrim);
-    setStatus(`${filtered.length} matches`);
-    render(filtered, qTrim);
+      if (bucketsToLoad.size === 0 && !hasLetters && qd.length >= 3){
+        bucketsToLoad.add(bucketOf(qd));
+      }
+
+      if (bucketsToLoad.size === 0){
+        setStatus('0 matches');
+        render([], qTrim);
+        return;
+      }
+
+      const combined = [];
+      for (const b of bucketsToLoad){
+        const data = await loadBucket(b);
+        combined.push(...data);
+      }
+
+      const filtered = filterRecords(combined, qTrim);
+      setStatus(`${filtered.length} matches`);
+      render(filtered, qTrim);
+    } finally {
+      setLoading(false);
+    }
   }
 
   qEl.addEventListener('input', debounce(onInput, 150));
@@ -289,29 +300,29 @@
     {
       label: 'NDC',
       items: [
-        { query: '00045-0192-04', text: '00045-0192-04 (Motrin ibuprofen suspension)' },
-        { query: '00006-0078-14', text: '00006-0078-14 (Janumet XR)' },
+        { query: '00002-7715-01', text: '00002-7715-01 (insulin glargine pen)' }, // insulin glargine
+        { query: '00003-0893-21', text: '00003-0893-21 (apixaban 2.5 mg tablet)' }, // apixaban
       ],
     },
     {
       label: 'Name',
       items: [
-        { query: 'tirzepatide', text: 'tirzepatide (Zepbound)' },
-        { query: 'amoxicillin', text: 'amoxicillin 500 mg tablet' },
+        { query: 'fluoxetine 20 mg tablet', text: 'fluoxetine 20 mg tablet' }, // fluoxetine
+        { query: 'lisinopril 20 mg', text: 'lisinopril 20 mg (with HCTZ)' }, // lisinopril/HCTZ combos
       ],
     },
     {
       label: 'RxCUI',
       items: [
-        { query: '2679323', text: '2679323 (Zepbound SBD)' },
-        { query: '311036', text: '311036 (Humulin R)' },
+        { query: '197886', text: '197886 (lisinopril/hydrochlorothiazide 20/12.5)' }, // lisinopril/HCTZ
+        { query: '1364441', text: '1364441 (apixaban 2.5 mg)' }, // apixaban
       ],
     },
     {
       label: 'UNII',
       items: [
-        { query: 'WK2XYI10QM', text: 'WK2XYI10QM (ibuprofen)' },
-        { query: 'OYN3CCI6QE', text: 'OYN3CCI6QE (tirzepatide)' },
+        { query: '9100L32L2N', text: '9100L32L2N (metformin)' }, // metformin
+        { query: '3Z9Y7UWC1J', text: '3Z9Y7UWC1J (apixaban)' }, // apixaban
       ],
     },
   ];

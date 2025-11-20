@@ -13,7 +13,10 @@
       <div class="search">
         <input id="q" type="text" placeholder="Search by NDC, name, RxCUI, or UNII" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" enterkeyhint="search" autofocus>
         <button id="searchBtn" type="button">Search</button>
-        <span id="status" aria-live="polite"></span>
+        <span class="status-wrap">
+          <span id="spinner" aria-hidden="true"></span>
+          <span id="status" aria-live="polite"></span>
+        </span>
       </div>
       <div id="examples" class="examples" aria-label="Example searches"></div>
     </header>
