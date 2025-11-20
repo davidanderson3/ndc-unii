@@ -1,13 +1,52 @@
 #!/usr/bin/env python3
-import csv, json, sys, re
+import argparse
+import csv, json, sys, re, os, subprocess, webbrowser, functools, urllib.request, zipfile
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from collections import defaultdict
 
-# --- Files (must be in current dir) ---
-RXNSAT   = Path("RXNSAT.RRF")
-RXNCONSO = Path("RXNCONSO.RRF")
-RXNREL   = Path("RXNREL.RRF")
+# --- Files (prefer extracted RxNorm_full_prescribe_current/rrf) ---
+RRF_DIR  = Path("RxNorm_full_prescribe_current") / "rrf"
+RXN_ZIP_URL = "https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_current.zip"
+
+def rrf_file(filename: str) -> Path:
+    """Pick RRF file path from the preferred folder, fall back to CWD."""
+    preferred = RRF_DIR / filename
+    if preferred.is_file():
+        return preferred
+    fallback = Path(filename)
+    if fallback.is_file():
+        return fallback
+    return preferred
+
+RXNSAT   = rrf_file("RXNSAT.RRF")
+RXNCONSO = rrf_file("RXNCONSO.RRF")
+RXNREL   = rrf_file("RXNREL.RRF")
 OUTPUT   = Path("ndc_unii_rxnorm.json")
+ROOT     = Path(__file__).resolve().parent
+
+def log(msg: str):
+    print(f"[ndc_unii] {msg}", flush=True)
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Build NDC to UNII mapping from RxNorm RRF files.")
+    parser.add_argument(
+        "--no-web",
+        action="store_true",
+        help="Skip building/serving the web viewer after generating ndc_unii_rxnorm.json.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("NDC_UNII_WEB_PORT", "8080")),
+        help="Port for the local web viewer (use 0 for an available ephemeral port).",
+    )
+    parser.add_argument(
+        "--skip-download",
+        action="store_true",
+        help="Do not attempt to download RxNorm; fail fast if RRF files are missing.",
+    )
+    return parser.parse_args(argv)
 
 DIRECT_TTYS = {"SCD","SBD","GPCK","BPCK"}
 ALL_TTYS    = {"SCD","SBD","GPCK","BPCK","SCDC","IN","PIN"}
@@ -148,13 +187,82 @@ def load_rel_maps(rel_path, tty_map):
 
     return sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin
 
-# ---------- Main ----------
-def main():
-    for p in (RXNSAT, RXNCONSO, RXNREL):
-        if not p.is_file():
-            print(f"Missing {p.name} in {Path.cwd()}", file=sys.stderr)
-            sys.exit(1)
+# ---------- Web helpers ----------
+def build_web_chunks():
+    log("Building web chunks (web/build_chunks.py)...")
+    subprocess.run(
+        [sys.executable, str(ROOT / "web" / "build_chunks.py")],
+        check=True,
+        cwd=ROOT,
+    )
 
+def serve_web(port: int):
+    log("Starting local web server...")
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(ROOT))
+    try:
+        httpd = ThreadingHTTPServer(("localhost", port), handler)
+    except OSError as exc:
+        log(f"Could not start web server on port {port}: {exc}")
+        return
+    url = f"http://localhost:{httpd.server_port}/web/"
+    log(f"Web viewer available at {url} (Ctrl+C to stop)")
+    try:
+        webbrowser.open(url, new=2)
+    except Exception:
+        pass
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        log("Stopping web server")
+    finally:
+        httpd.server_close()
+
+def ensure_rrf_files(skip_download: bool):
+    missing = [p for p in (RXNSAT, RXNCONSO, RXNREL) if not p.is_file()]
+    if not missing:
+        return
+    if skip_download:
+        names = ", ".join(sorted({p.name for p in missing}))
+        print(
+            f"Missing RxNorm RRF file(s): {names}. Download "
+            f"{RXN_ZIP_URL}, unzip it in the repo root, and ensure the RRF files exist under "
+            "RxNorm_full_prescribe_current/rrf/ (or copy them to the current directory).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    zip_path = ROOT / "RxNorm_full_prescribe_current.zip"
+    log(f"Downloading RxNorm Current Prescribable Content to {zip_path} ...")
+    try:
+        urllib.request.urlretrieve(RXN_ZIP_URL, zip_path)
+    except Exception as exc:
+        print(f"Failed to download RxNorm zip: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    log("Extracting zip...")
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(ROOT)
+    except Exception as exc:
+        print(f"Failed to extract RxNorm zip: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    missing_after = [p for p in (RXNSAT, RXNCONSO, RXNREL) if not p.is_file()]
+    if missing_after:
+        names = ", ".join(sorted({p.name for p in missing_after}))
+        print(
+            f"After download, still missing: {names}. Verify zip contents.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    log("RxNorm files ready.")
+
+# ---------- Main ----------
+def main(argv=None):
+    args = parse_args(argv)
+    ensure_rrf_files(args.skip_download)
+
+    log("Loading RxNorm files...")
     tty_map, name_map, unii_map = load_conso(RXNCONSO)
     ndc_direct = load_ndc_direct(RXNSAT)
     sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = load_rel_maps(RXNREL, tty_map)
@@ -162,6 +270,7 @@ def main():
 
     out = []
 
+    log("Building NDC → ingredients mapping...")
     for ndc, direct_rxcuis in ndc_direct.items():
         # one record PER direct attachment
         for direct in sorted(direct_rxcuis):
@@ -281,9 +390,16 @@ def main():
 
     # Ensure deterministic order of records
     out.sort(key=lambda rec: (rec["ndc"], rec["tty"], rec["rxcui"]))
+    log("Writing ndc_unii_rxnorm.json...")
     with open(OUTPUT, "w", encoding="utf-8") as g:
         json.dump(out, g, indent=2)
-    print(f"Wrote {len(out)} rows to {OUTPUT}")
+    log(f"Wrote {len(out)} rows to {OUTPUT} ({len(out)} records)")
+
+    if args.no_web:
+        return
+
+    build_web_chunks()
+    serve_web(args.port)
 
 if __name__ == "__main__":
     main()

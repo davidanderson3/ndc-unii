@@ -4,3 +4,4 @@ RXNCONSO.RRF
 web/*
 RXNSAT.RRF
 test_json_matches_rrf_report.html
+.vscode

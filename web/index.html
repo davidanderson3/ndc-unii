@@ -9,12 +9,13 @@
   <body>
     <header>
       <h1>NDC Search</h1>
-      <p class="subtitle">Search for SAB=RXNORM NDCs. Input a normalized (11-digit) NDC.</p>
+      <p class="subtitle">Search SAB=RXNORM NDCs by NDC, name, RxCUI, or UNII.</p>
       <div class="search">
-        <input id="q" type="text" placeholder="Enter NDC (11 digits)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="numeric" enterkeyhint="search" autofocus>
+        <input id="q" type="text" placeholder="Search by NDC, name, RxCUI, or UNII" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" enterkeyhint="search" autofocus>
         <button id="searchBtn" type="button">Search</button>
         <span id="status" aria-live="polite"></span>
       </div>
+      <div id="examples" class="examples" aria-label="Example searches"></div>
     </header>
 
     <main>

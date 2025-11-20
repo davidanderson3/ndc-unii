@@ -41,9 +41,24 @@ def main():
         data = json.load(f)
 
     buckets = defaultdict(list)
+    search_records = []
     for rec in data:
         b = bucket_key(rec.get("ndc"))
         buckets[b].append(rec)
+        # Collect UNIIs across ingredients to enable lightweight search index
+        uniis = set()
+        for ing in rec.get("ingredients", []) or []:
+            if ing.get("unii"):
+                uniis.add(ing["unii"])
+        search_records.append(
+            {
+                "bucket": b,
+                "ndc": rec.get("ndc"),
+                "rxcui": rec.get("rxcui"),
+                "name": rec.get("str"),
+                "unii": sorted(uniis),
+            }
+        )
 
     OUTD.mkdir(parents=True, exist_ok=True)
 
@@ -62,6 +77,10 @@ def main():
         json.dump(meta, f, indent=2)
     print(f"Wrote data/index.json with {len(meta['buckets'])} buckets")
 
+    # Lightweight search index for name/RxCUI/UNII filtering (keeps buckets small)
+    with open(OUTD / "search_index.json", "w", encoding="utf-8") as f:
+        json.dump({"records": search_records}, f, separators=(",", ":"))
+    print(f"Wrote data/search_index.json with {len(search_records)} records")
+
 if __name__ == "__main__":
     main()
-

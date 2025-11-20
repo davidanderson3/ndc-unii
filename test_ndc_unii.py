@@ -137,7 +137,7 @@ def test_json_matches_rrf():
     expected_counts = {}
     try:
         steps.append("Executing ndc_unii.py to generate ndc_unii_rxnorm.json")
-        subprocess.run([sys.executable, "ndc_unii.py"], check=True)
+        subprocess.run([sys.executable, "ndc_unii.py", "--no-web"], check=True)
         steps.append("ndc_unii.py completed successfully")
 
         steps.append("Loading generated JSON output")

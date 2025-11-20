@@ -9,6 +9,7 @@
   // Cache of loaded buckets
   const cache = new Map(); // bucket -> array of records
   let bucketIndex = null;  // { bucket_size: 'first3digits', buckets: { '123': count, ... } }
+  let searchIndex = null;  // { records: [ { bucket, ndc, rxcui, name, unii: [] }, ... ] }
 
   // Utilities
   const digits = (s) => (s||'').replace(/\D+/g, '');
@@ -41,6 +42,14 @@
     }
   }
 
+  async function loadSearchIndex(){
+    if (searchIndex) return searchIndex;
+    const res = await fetch('data/search_index.json', { cache: 'no-store' });
+    if(!res.ok) throw new Error('search_index load failed');
+    searchIndex = await res.json();
+    return searchIndex;
+  }
+
   async function loadBucket(bucket){
     if (cache.has(bucket)) return cache.get(bucket);
     setStatus(`Loading ${bucket}…`);
@@ -59,7 +68,20 @@
     }
   }
 
-  // Removed full-scan helpers since we now support NDC-only search
+  function groupRecords(records){
+    const merged = new Map();
+    for (const rec of records || []){
+      const key = JSON.stringify([rec.str || '', rec.tty || '', rec.rxcui || '', rec.ingredients || []]);
+      if (!merged.has(key)){
+        merged.set(key, { base: rec, ndcs: [] });
+      }
+      merged.get(key).ndcs.push(rec.ndc);
+    }
+    return Array.from(merged.values(), ({ base, ndcs }) => ({
+      ...base,
+      ndcs: ndcs.sort(),
+    }));
+  }
 
   function render(records, query){
     resultsEl.innerHTML = '';
@@ -70,8 +92,9 @@
       resultsEl.appendChild(div);
       return;
     }
+    const grouped = groupRecords(records);
     const frag = document.createDocumentFragment();
-    for (const rec of records){
+    for (const rec of grouped){
       const card = document.createElement('div');
       card.className = 'card';
 
@@ -87,7 +110,8 @@
       // Details rows: NDC and TTY
       const ndcLine = document.createElement('div');
       ndcLine.className = 'kv';
-      ndcLine.innerHTML = `<strong>NDC</strong>: <span class="ndc">${rec.ndc}</span>`;
+      const ndcList = rec.ndcs && rec.ndcs.length ? rec.ndcs.join(', ') : rec.ndc;
+      ndcLine.innerHTML = `<strong>NDC</strong>: <span class="ndc">${ndcList}</span>`;
       card.appendChild(ndcLine);
       const ttyLine = document.createElement('div');
       ttyLine.className = 'kv';
@@ -145,9 +169,25 @@
 
   function filterRecords(records, query){
     if (!query) return [];
-    const qd = digits(query.trim());
-    if (!qd) return [];
-    return records.filter(rec => digits(rec.ndc).includes(qd));
+    const q = query.trim().toLowerCase();
+    const qd = digits(q);
+    const qdOk = qd.length >= 3;
+    return records.filter(rec => {
+      const ndcDigits = digits(rec.ndc);
+      const name = (rec.str || '').toLowerCase();
+      const rxcui = (rec.rxcui || '').toString().toLowerCase();
+      const uniis = new Set();
+      for (const ing of rec.ingredients || []){
+        if (ing && ing.unii){
+          uniis.add(String(ing.unii).toLowerCase());
+        }
+      }
+      const hasUNII = uniis.has(q);
+      const ndcMatch = qdOk ? ndcDigits.includes(qd) : false;
+      const nameMatch = name.includes(q);
+      const rxcuiMatch = rxcui && rxcui.includes(q);
+      return ndcMatch || nameMatch || hasUNII || rxcuiMatch;
+    });
   }
 
   async function onInput(){
@@ -155,23 +195,65 @@
     setParam('q', query);
     const qTrim = query.trim();
     const qd = digits(qTrim);
+    const hasLetters = /[a-z]/i.test(qTrim);
 
-    if (!qd){
+    if (!qd && !hasLetters){
       setStatus('Ready');
-      resultsEl.innerHTML = '<div class="hint">Enter a normalized (11-digit) NDC. Type 3+ digits to begin.</div>';
+      resultsEl.innerHTML = '<div class="hint">Enter an NDC (3+ digits) or search by name, RxCUI, or UNII.</div>';
       return;
     }
 
-    if (qd.length < 3){
+    // NDC-only search path
+    if (!hasLetters && qd.length > 0 && qd.length < 3){
       setStatus('Type 3+ digits');
       resultsEl.innerHTML = '<div class="hint">Enter at least the first 3 NDC digits.</div>';
       return;
     }
 
     await loadIndex();
-    const bucket = bucketOf(qd);
-    const data = await loadBucket(bucket);
-    const filtered = filterRecords(data, qTrim);
+
+    // Try search index first (covers name/RxCUI/UNII and numeric RxCUIs);
+    // fall back to NDC bucket if nothing found and query looks like NDC digits.
+    let bucketsToLoad = new Set();
+    try {
+      const idx = await loadSearchIndex();
+      const qLower = qTrim.toLowerCase();
+      for (const rec of idx.records || []){
+        const name = (rec.name || '').toLowerCase();
+        const rxcui = (rec.rxcui || '').toString().toLowerCase();
+        const uniis = (rec.unii || []).map(u => String(u).toLowerCase());
+        const ndcDigits = digits(rec.ndc);
+        const ndcMatch = qd.length >= 3 ? ndcDigits.includes(qd) : false;
+        const nameMatch = qLower && name.includes(qLower);
+        const rxcuiMatch = qLower && rxcui.includes(qLower);
+        const uniiMatch = qLower && uniis.includes(qLower);
+        if (ndcMatch || nameMatch || rxcuiMatch || uniiMatch){
+          if (rec.bucket) bucketsToLoad.add(rec.bucket);
+        }
+      }
+    } catch (e){
+      setStatus('Search index missing; ensure web/data/search_index.json exists');
+      render([], qTrim);
+      return;
+    }
+
+    if (bucketsToLoad.size === 0 && qd.length >= 3){
+      bucketsToLoad.add(bucketOf(qd));
+    }
+
+    if (bucketsToLoad.size === 0){
+      setStatus('0 matches');
+      render([], qTrim);
+      return;
+    }
+
+    const combined = [];
+    for (const b of bucketsToLoad){
+      const data = await loadBucket(b);
+      combined.push(...data);
+    }
+
+    const filtered = filterRecords(combined, qTrim);
     setStatus(`${filtered.length} matches`);
     render(filtered, qTrim);
   }
@@ -191,7 +273,7 @@
     onInput();
   } else {
     setStatus('Ready');
-    resultsEl.innerHTML = '<div class="hint">Provide chunks in web/data via the build script, then search by NDC.</div>';
+    resultsEl.innerHTML = '<div class="hint">Provide chunks in web/data via the build script, then search by NDC, name, RxCUI, or UNII.</div>';
   }
 
   window.addEventListener('popstate', () => {
@@ -201,4 +283,69 @@
       onInput();
     }
   });
+
+  // Example searches (picked from current data) to make the UI discoverable
+  const examples = [
+    {
+      label: 'NDC',
+      items: [
+        { query: '00045-0192-04', text: '00045-0192-04 (Motrin ibuprofen suspension)' },
+        { query: '00006-0078-14', text: '00006-0078-14 (Janumet XR)' },
+      ],
+    },
+    {
+      label: 'Name',
+      items: [
+        { query: 'tirzepatide', text: 'tirzepatide (Zepbound)' },
+        { query: 'amoxicillin', text: 'amoxicillin 500 mg tablet' },
+      ],
+    },
+    {
+      label: 'RxCUI',
+      items: [
+        { query: '2679323', text: '2679323 (Zepbound SBD)' },
+        { query: '311036', text: '311036 (Humulin R)' },
+      ],
+    },
+    {
+      label: 'UNII',
+      items: [
+        { query: 'WK2XYI10QM', text: 'WK2XYI10QM (ibuprofen)' },
+        { query: 'OYN3CCI6QE', text: 'OYN3CCI6QE (tirzepatide)' },
+      ],
+    },
+  ];
+
+  function renderExamples(){
+    const container = document.getElementById('examples');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const group of examples){
+      const block = document.createElement('div');
+      block.className = 'example-group';
+      const title = document.createElement('div');
+      title.className = 'example-title';
+      title.textContent = group.label;
+      block.appendChild(title);
+
+      const chips = document.createElement('div');
+      chips.className = 'example-chips';
+      for (const item of group.items){
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'example-chip';
+        btn.textContent = item.text;
+        btn.addEventListener('click', () => {
+          qEl.value = item.query;
+          onInput();
+          qEl.focus();
+        });
+        chips.appendChild(btn);
+      }
+      block.appendChild(chips);
+      container.appendChild(block);
+    }
+  }
+
+  renderExamples();
 })();
