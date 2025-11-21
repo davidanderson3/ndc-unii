@@ -10,19 +10,21 @@
     <header>
       <h1>NDC Search</h1>
       <p class="subtitle">Search SAB=RXNORM NDCs by NDC, name, RxCUI, or UNII.</p>
-      <div class="search">
-        <input id="q" type="text" placeholder="Search by NDC, name, RxCUI, or UNII" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" enterkeyhint="search" autofocus>
-        <button id="searchBtn" type="button">Search</button>
-        <span class="status-wrap">
-          <span id="spinner" aria-hidden="true"></span>
-          <span id="status" aria-live="polite"></span>
-        </span>
-      </div>
-      <div id="examples" class="examples" aria-label="Example searches"></div>
     </header>
 
     <main>
-      <div id="results"></div>
+      <section>
+        <div class="search">
+          <input id="q" type="text" placeholder="Search by NDC, name, RxCUI, or UNII" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" enterkeyhint="search" autofocus>
+          <button id="searchBtn" type="button">Search</button>
+          <span class="status-wrap">
+            <span id="spinner" aria-hidden="true"></span>
+            <span id="status" aria-live="polite"></span>
+          </span>
+        </div>
+        <div id="examples" class="examples" aria-label="Example searches"></div>
+        <div id="results"></div>
+      </section>
     </main>
 
     <footer>

@@ -50,6 +50,8 @@ def parse_args(argv=None):
 
 DIRECT_TTYS = {"SCD","SBD","GPCK","BPCK"}
 ALL_TTYS    = {"SCD","SBD","GPCK","BPCK","SCDC","IN","PIN"}
+# SCDCs that should be ignored when linking ingredients (known bad/phantom entries)
+EXCLUDED_SCDC = {"1364431"}  # Apixaban SCDC incorrectly links via consists_of; drop the SCDC hop
 
 # ---------- Load CONSO (TTYs, names, UNIIs) ----------
 def load_conso(p):
@@ -266,6 +268,17 @@ def main(argv=None):
     tty_map, name_map, unii_map = load_conso(RXNCONSO)
     ndc_direct = load_ndc_direct(RXNSAT)
     sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = load_rel_maps(RXNREL, tty_map)
+    if EXCLUDED_SCDC:
+        # Remove known-bad SCDC hops before building ingredient links
+        for scd, scdcs in list(scd_to_scdc.items()):
+            filtered = {s for s in scdcs if s not in EXCLUDED_SCDC}
+            if filtered:
+                scd_to_scdc[scd] = filtered
+            else:
+                scd_to_scdc.pop(scd, None)
+        for scdc in EXCLUDED_SCDC:
+            scdc_to_in.pop(scdc, None)
+            scdc_to_pin.pop(scdc, None)
     am_map, ai_map, boss_map = load_scd_attrs(RXNSAT)
 
     out = []
