@@ -14,6 +14,16 @@ def build_expected():
     ndc_direct = ndc_unii.load_ndc_direct(ndc_unii.RXNSAT)
     sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = ndc_unii.load_rel_maps(ndc_unii.RXNREL, tty_map)
     am_map, ai_map, boss_map = ndc_unii.load_scd_attrs(ndc_unii.RXNSAT)
+    if ndc_unii.EXCLUDED_SCDC:
+        for scd, scdcs in list(scd_to_scdc.items()):
+            filtered = {s for s in scdcs if s not in ndc_unii.EXCLUDED_SCDC}
+            if filtered:
+                scd_to_scdc[scd] = filtered
+            else:
+                scd_to_scdc.pop(scd, None)
+        for scdc in ndc_unii.EXCLUDED_SCDC:
+            scdc_to_in.pop(scdc, None)
+            scdc_to_pin.pop(scdc, None)
 
     out = []
     for ndc, direct_rxcuis in ndc_direct.items():
@@ -31,7 +41,8 @@ def build_expected():
             if not scd:
                 continue
             ingredients = []
-            seen = set()
+            seen_keys = set()
+            seen_rxcuis = set()
             am_by_scdc = am_map.get(scd, {})
             ai_by_scdc = ai_map.get(scd, {})
             boss_by_scdc = boss_map.get(scd, {})
@@ -47,9 +58,10 @@ def build_expected():
                     boss_target = boss_key
                 for pin in scdc_to_pin.get(scdc, ()):   # PIN ingredients
                     key = (scdc, pin)
-                    if key in seen:
+                    if key in seen_keys:
                         continue
-                    seen.add(key)
+                    seen_keys.add(key)
+                    seen_rxcuis.add(pin)
                     ingredients.append({
                         "tty": "PIN",
                         "rxcui": pin,
@@ -62,9 +74,10 @@ def build_expected():
                     })
                 for inn in scdc_to_in.get(scdc, ()):   # IN ingredients
                     key = (scdc, inn)
-                    if key in seen:
+                    if key in seen_keys:
                         continue
-                    seen.add(key)
+                    seen_keys.add(key)
+                    seen_rxcuis.add(inn)
                     ingredients.append({
                         "tty": "IN",
                         "rxcui": inn,
@@ -75,10 +88,39 @@ def build_expected():
                         "basis_of_strength": inn == boss_target,
                         "scdc": scdc,
                     })
+            ai_targets = {t for t in ai_by_scdc.values() if t and t.isdigit()}
+            am_targets = {t for t in am_by_scdc.values() if t and t.isdigit()}
+            basis_targets = set()
+            for scdc, key in boss_by_scdc.items():
+                if key == "AI":
+                    target = ai_by_scdc.get(scdc)
+                elif key == "AM":
+                    target = am_by_scdc.get(scdc)
+                else:
+                    target = key
+                if target and target.isdigit():
+                    basis_targets.add(target)
+
+            attr_targets = ai_targets | am_targets | basis_targets
+            for target in sorted(attr_targets):
+                if target in seen_rxcuis:
+                    continue
+                seen_rxcuis.add(target)
+                ingredients.append({
+                    "tty": tty_map.get(target, ""),
+                    "rxcui": target,
+                    "str": name_map.get(target, ""),
+                    "unii": unii_map.get(target),
+                    "active_ingredient": target in ai_targets,
+                    "active_moiety": target in am_targets,
+                    "basis_of_strength": target in basis_targets,
+                    "scdc": None,
+                })
+
             if not ingredients:
                 continue
             # Sort ingredients deterministically to mirror script output
-            ingredients.sort(key=lambda ing: (ing["scdc"], ing["tty"], ing["rxcui"]))
+            ingredients.sort(key=lambda ing: (ing.get("tty") or "", ing["rxcui"]))
             out.append({
                 "ndc": ndc,
                 "tty": dtty,
@@ -124,6 +166,21 @@ def summarize_counts(data):
     return counts
 
 
+def canonicalize(records):
+    """Sort ingredients deterministically to avoid hash-order randomness."""
+    for rec in records:
+        ings = rec.get("ingredients")
+        if ings:
+            ings.sort(
+                key=lambda ing: (
+                    ing.get("tty") or "",
+                    ing["rxcui"],
+                    ing.get("scdc") or "",
+                )
+            )
+    return records
+
+
 def test_json_matches_rrf():
     """Run ndc_unii.py and compare its JSON output to the RxNorm RRF files.
 
@@ -143,12 +200,14 @@ def test_json_matches_rrf():
         steps.append("Loading generated JSON output")
         with open("ndc_unii_rxnorm.json", encoding="utf-8") as f:
             data = json.load(f)
+        canonicalize(data)
         steps.append(f"Loaded {len(data)} records from ndc_unii_rxnorm.json")
         data_counts = summarize_counts(data)
         steps.append("Summarized output dataset counts")
 
         steps.append("Building expected dataset from RxNorm RRF files")
         expected = build_expected()
+        canonicalize(expected)
         steps.append(f"Built expected dataset with {len(expected)} records")
         expected_counts = summarize_counts(expected)
         steps.append("Summarized expected dataset counts")
