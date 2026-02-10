@@ -110,12 +110,34 @@
       titleRow.appendChild(nameEl);
       card.appendChild(titleRow);
 
-      // Details rows: NDC and TTY
+      // Details rows: NDC, RXCUI, and TTY
       const ndcLine = document.createElement('div');
       ndcLine.className = 'kv';
-      const ndcList = rec.ndcs && rec.ndcs.length ? rec.ndcs.join(', ') : rec.ndc;
-      ndcLine.innerHTML = `<strong>NDC</strong>: <span class="ndc">${ndcList}</span>`;
+      if (rec.ndcs && rec.ndcs.length > 1) {
+        const firstNdc = rec.ndcs[0];
+        ndcLine.innerHTML = `<strong>NDC</strong>: <span class="ndc">${firstNdc}</span> <a href="#" class="expand-ndc" style="margin-left:8px;font-size:12px;">Show more...</a>`;
+        const expandLink = ndcLine.querySelector('.expand-ndc');
+        expandLink.addEventListener('click', function(e) {
+          e.preventDefault();
+          expandLink.remove();
+          for (const ndc of rec.ndcs.slice(1)) {
+            const ndcSpan = document.createElement('span');
+            ndcSpan.className = 'ndc';
+            ndcSpan.textContent = ', ' + ndc;
+            ndcLine.appendChild(ndcSpan);
+          }
+        });
+      } else {
+        const ndcList = rec.ndcs && rec.ndcs.length ? rec.ndcs.join(', ') : rec.ndc;
+        ndcLine.innerHTML = `<strong>NDC</strong>: <span class="ndc">${ndcList}</span>`;
+      }
       card.appendChild(ndcLine);
+
+      const rxcuiLine = document.createElement('div');
+      rxcuiLine.className = 'kv';
+      rxcuiLine.innerHTML = `<strong>RXCUI</strong>: <span class="rxcui">${rec.rxcui || ''}</span>`;
+      card.appendChild(rxcuiLine);
+
       const ttyLine = document.createElement('div');
       ttyLine.className = 'kv';
       ttyLine.innerHTML = `<strong>TTY</strong>: <span class="tty">${rec.tty || ''}</span>`;
@@ -123,8 +145,11 @@
 
       // Ingredient sections by TTY with flags and UNII
       const ingredients = Array.isArray(rec.ingredients) ? rec.ingredients : [];
-      const byIN  = ingredients.filter(i => i && i.tty === 'IN');
-      const byPIN = ingredients.filter(i => i && i.tty === 'PIN');
+      let byIN  = ingredients.filter(i => i && i.tty === 'IN');
+      let byPIN = ingredients.filter(i => i && i.tty === 'PIN');
+      // Sort alphabetically by name (case-insensitive)
+      byIN = byIN.slice().sort((a, b) => (a.str || '').localeCompare(b.str || '', undefined, {sensitivity: 'base'}));
+      byPIN = byPIN.slice().sort((a, b) => (a.str || '').localeCompare(b.str || '', undefined, {sensitivity: 'base'}));
 
       function appendTTYSection(label, list){
         if (!list || !list.length) return;

@@ -205,7 +205,13 @@ def serve_web(port: int):
         httpd = ThreadingHTTPServer(("localhost", port), handler)
     except OSError as exc:
         log(f"Could not start web server on port {port}: {exc}")
-        return
+        log("Trying an available ephemeral port...")
+        try:
+            httpd = ThreadingHTTPServer(("localhost", 0), handler)
+        except OSError as exc2:
+            log(f"Could not start web server on any port: {exc2}")
+            return
+        log(f"Started web server on port {httpd.server_port} instead.")
     url = f"http://localhost:{httpd.server_port}/web/"
     log(f"Web viewer available at {url} (Ctrl+C to stop)")
     try:
