@@ -5,25 +5,41 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from collections import defaultdict
 
-# --- Files (prefer extracted RxNorm_full_prescribe_current/rrf) ---
-RRF_DIR  = Path("RxNorm_full_prescribe_current") / "rrf"
+ROOT     = Path(__file__).resolve().parent
 RXN_ZIP_URL = "https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_current.zip"
 
-def rrf_file(filename: str) -> Path:
-    """Pick RRF file path from the preferred folder, fall back to CWD."""
-    preferred = RRF_DIR / filename
-    if preferred.is_file():
-        return preferred
-    fallback = Path(filename)
-    if fallback.is_file():
-        return fallback
-    return preferred
-
-RXNSAT   = rrf_file("RXNSAT.RRF")
-RXNCONSO = rrf_file("RXNCONSO.RRF")
-RXNREL   = rrf_file("RXNREL.RRF")
 OUTPUT   = Path("ndc_unii_rxnorm.json")
-ROOT     = Path(__file__).resolve().parent
+
+def rrf_candidates(filename: str):
+    """Candidate locations for RRFs across current and legacy unzip layouts."""
+    search_dirs = [
+        ROOT / "rrf",
+        ROOT / "RxNorm_full_prescribe_current" / "rrf",
+        ROOT,
+        Path.cwd() / "rrf",
+        Path.cwd() / "RxNorm_full_prescribe_current" / "rrf",
+        Path.cwd(),
+    ]
+    unique_dirs = []
+    seen = set()
+    for d in search_dirs:
+        key = str(d.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_dirs.append(d)
+    return [d / filename for d in unique_dirs]
+
+def resolve_rrf_file(filename: str) -> Path:
+    """Pick first existing RRF path; otherwise return the primary expected location."""
+    candidates = rrf_candidates(filename)
+    for p in candidates:
+        if p.is_file():
+            return p
+    return candidates[0]
+
+def resolve_rrf_files():
+    return {name: resolve_rrf_file(name) for name in ("RXNSAT.RRF", "RXNCONSO.RRF", "RXNREL.RRF")}
 
 def log(msg: str):
     print(f"[ndc_unii] {msg}", flush=True)
@@ -38,8 +54,13 @@ def parse_args(argv=None):
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("NDC_UNII_WEB_PORT", "8080")),
-        help="Port for the local web viewer (use 0 for an available ephemeral port).",
+        default=int(os.environ.get("NDC_UNII_WEB_PORT", "0")),
+        help="Port for the local web viewer (default: 0 for an available ephemeral port).",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("NDC_UNII_WEB_HOST", "127.0.0.1"),
+        help="Host interface for the local web viewer (default: 127.0.0.1).",
     )
     parser.add_argument(
         "--skip-download",
@@ -198,21 +219,21 @@ def build_web_chunks():
         cwd=ROOT,
     )
 
-def serve_web(port: int):
+def serve_web(host: str, port: int):
     log("Starting local web server...")
     handler = functools.partial(SimpleHTTPRequestHandler, directory=str(ROOT))
     try:
-        httpd = ThreadingHTTPServer(("localhost", port), handler)
+        httpd = ThreadingHTTPServer((host, port), handler)
     except OSError as exc:
-        log(f"Could not start web server on port {port}: {exc}")
+        log(f"Could not start web server on {host}:{port}: {exc}")
         log("Trying an available ephemeral port...")
         try:
-            httpd = ThreadingHTTPServer(("localhost", 0), handler)
+            httpd = ThreadingHTTPServer((host, 0), handler)
         except OSError as exc2:
-            log(f"Could not start web server on any port: {exc2}")
+            log(f"Could not start web server on {host}: {exc2}")
             return
         log(f"Started web server on port {httpd.server_port} instead.")
-    url = f"http://localhost:{httpd.server_port}/web/"
+    url = f"http://{host}:{httpd.server_port}/web/"
     log(f"Web viewer available at {url} (Ctrl+C to stop)")
     try:
         webbrowser.open(url, new=2)
@@ -226,15 +247,16 @@ def serve_web(port: int):
         httpd.server_close()
 
 def ensure_rrf_files(skip_download: bool):
-    missing = [p for p in (RXNSAT, RXNCONSO, RXNREL) if not p.is_file()]
+    rrf_paths = resolve_rrf_files()
+    missing = [name for name, p in rrf_paths.items() if not p.is_file()]
     if not missing:
-        return
+        return rrf_paths
     if skip_download:
-        names = ", ".join(sorted({p.name for p in missing}))
+        names = ", ".join(sorted(missing))
         print(
             f"Missing RxNorm RRF file(s): {names}. Download "
             f"{RXN_ZIP_URL}, unzip it in the repo root, and ensure the RRF files exist under "
-            "RxNorm_full_prescribe_current/rrf/ (or copy them to the current directory).",
+            "rrf/ or RxNorm_full_prescribe_current/rrf/ (or copy them to the current directory).",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -255,25 +277,30 @@ def ensure_rrf_files(skip_download: bool):
         print(f"Failed to extract RxNorm zip: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    missing_after = [p for p in (RXNSAT, RXNCONSO, RXNREL) if not p.is_file()]
+    rrf_paths = resolve_rrf_files()
+    missing_after = [name for name, p in rrf_paths.items() if not p.is_file()]
     if missing_after:
-        names = ", ".join(sorted({p.name for p in missing_after}))
+        names = ", ".join(sorted(missing_after))
         print(
             f"After download, still missing: {names}. Verify zip contents.",
             file=sys.stderr,
         )
         sys.exit(1)
     log("RxNorm files ready.")
+    return rrf_paths
 
 # ---------- Main ----------
 def main(argv=None):
     args = parse_args(argv)
-    ensure_rrf_files(args.skip_download)
+    rrf_paths = ensure_rrf_files(args.skip_download)
+    rxnsat = rrf_paths["RXNSAT.RRF"]
+    rxnconso = rrf_paths["RXNCONSO.RRF"]
+    rxnrel = rrf_paths["RXNREL.RRF"]
 
     log("Loading RxNorm files...")
-    tty_map, name_map, unii_map = load_conso(RXNCONSO)
-    ndc_direct = load_ndc_direct(RXNSAT)
-    sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = load_rel_maps(RXNREL, tty_map)
+    tty_map, name_map, unii_map = load_conso(rxnconso)
+    ndc_direct = load_ndc_direct(rxnsat)
+    sbd_to_scd, pack_to_scd, scd_to_scdc, scdc_to_in, scdc_to_pin = load_rel_maps(rxnrel, tty_map)
     if EXCLUDED_SCDC:
         # Remove known-bad SCDC hops before building ingredient links
         for scd, scdcs in list(scd_to_scdc.items()):
@@ -285,7 +312,7 @@ def main(argv=None):
         for scdc in EXCLUDED_SCDC:
             scdc_to_in.pop(scdc, None)
             scdc_to_pin.pop(scdc, None)
-    am_map, ai_map, boss_map = load_scd_attrs(RXNSAT)
+    am_map, ai_map, boss_map = load_scd_attrs(rxnsat)
 
     out = []
 
@@ -418,7 +445,7 @@ def main(argv=None):
         return
 
     build_web_chunks()
-    serve_web(args.port)
+    serve_web(args.host, args.port)
 
 if __name__ == "__main__":
     main()
